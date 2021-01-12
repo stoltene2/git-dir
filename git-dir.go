@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	git "github.com/go-git/go-git/v5"
 )
@@ -94,35 +95,46 @@ func main() {
 		close(gitDirs)
 	}()
 
+	var wg sync.WaitGroup
+
 	for dir := range gitDirs {
-		repo, err := git.PlainOpen(dir)
+		wg.Add(1)
 
-		if err != nil {
-			fmt.Println("error:", err)
-			continue
-		}
+		go func(d string) {
+			repo, err := git.PlainOpen(d)
 
-		wt, err := repo.Worktree()
+			if err != nil {
+				fmt.Println("error:", err)
+				wg.Done()
+				return
+			}
 
-		if err != nil {
-			fmt.Println("error:", err)
-			continue
-		}
+			wt, err := repo.Worktree()
 
-		st, err := wt.Status()
+			if err != nil {
+				fmt.Println("error:", err)
+				wg.Done()
+				return
+			}
 
-		if err != nil {
-			fmt.Println("error:", err)
-			continue
-		}
+			st, err := wt.Status()
 
-		if !st.IsClean() {
-			fmt.Println("Dirty:", dir)
-		} else {
-			fmt.Println("Clean:", dir)
-		}
+			if err != nil {
+				fmt.Println("error:", err)
+				wg.Done()
+				return
+
+			}
+
+			if !st.IsClean() {
+				fmt.Println("Dirty:", d)
+			} else {
+				fmt.Println("Clean:", d)
+			}
+			wg.Done()
+		}(dir)
 	}
 
-	fmt.Println("Exiting")
+	wg.Wait()
 
 }

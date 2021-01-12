@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	git "github.com/go-git/go-git/v5"
 )
 
 type dir struct {
@@ -19,19 +21,22 @@ func (dir *dir) isGitRepo() bool {
 	return err == nil
 }
 
-func walkFunc(path string, info os.FileInfo, err error) error {
-	if err != nil {
-		return filepath.SkipDir
-	}
+func walkFunc(gitDirs chan<- string) func(string, os.FileInfo, error) error {
 
-	if d, err := toDir(path); err == nil && d.isGitRepo() {
-		fmt.Println(d.path)
-		return filepath.SkipDir
-	} else if err != nil || !info.IsDir() {
+	return func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+
+		if d, err := toDir(path); err == nil && d.isGitRepo() {
+			gitDirs <- d.path
+			return filepath.SkipDir
+		} else if err != nil || !info.IsDir() {
+			return nil
+		}
+
 		return nil
 	}
-
-	return nil
 }
 
 func toDir(path string) (dir, error) {
@@ -82,5 +87,42 @@ func main() {
 		fmt.Println("not a git repo")
 	}
 
-	filepath.Walk(dir.path, walkFunc)
+	gitDirs := make(chan string)
+
+	go func() {
+		filepath.Walk(dir.path, walkFunc(gitDirs))
+		close(gitDirs)
+	}()
+
+	for dir := range gitDirs {
+		repo, err := git.PlainOpen(dir)
+
+		if err != nil {
+			fmt.Println("error:", err)
+			continue
+		}
+
+		wt, err := repo.Worktree()
+
+		if err != nil {
+			fmt.Println("error:", err)
+			continue
+		}
+
+		st, err := wt.Status()
+
+		if err != nil {
+			fmt.Println("error:", err)
+			continue
+		}
+
+		if !st.IsClean() {
+			fmt.Println("Dirty:", dir)
+		} else {
+			fmt.Println("Clean:", dir)
+		}
+	}
+
+	fmt.Println("Exiting")
+
 }

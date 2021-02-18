@@ -7,8 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"bufio"
+	"strings"
 
+	fs "github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
+	gitignore "github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 type dir struct {
@@ -69,6 +73,31 @@ func toDir(path string) (dir, error) {
 	return d, nil
 }
 
+// readExcludeFile assumes that path is the root directory of a git
+// repository. If a .git/info/exclude file is included then it is used as additional patterns
+func readExcludeFile(path string) (ps []gitignore.Pattern, err error) {
+	const commentPrefix = "#"
+	f := fs.New(path)
+
+	file, err := f.Open(f.Join(append([]string{".git", "info"}, "exclude")...))
+
+	if err == nil {
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			s := scanner.Text()
+			if !strings.HasPrefix(s, commentPrefix) && len(strings.TrimSpace(s)) > 0 {
+				ps = append(ps, gitignore.ParsePattern(s, []string{}))
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	return
+}
+
 func main() {
 	if len(os.Args) == 1 {
 		log.Fatal("You must pass a directory argument")
@@ -109,12 +138,20 @@ func main() {
 				return
 			}
 
+			// Check to see if there is an exclude file to load up
 			wt, err := repo.Worktree()
 
 			if err != nil {
 				fmt.Println("error:", err)
 				wg.Done()
 				return
+			}
+
+
+			patterns, patErr := readExcludeFile(d)
+
+			if patErr == nil {
+				wt.Excludes = append(wt.Excludes, patterns...)
 			}
 
 			st, err := wt.Status()
@@ -136,5 +173,4 @@ func main() {
 	}
 
 	wg.Wait()
-
 }
